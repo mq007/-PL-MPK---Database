@@ -1,0 +1,237 @@
+IF OBJECT_ID('dbo.proc_wymienKierowce') IS NOT NULL
+DROP PROC proc_wymienKierowce
+GO
+CREATE PROC proc_wymienKierowce (@Kierowca1 NVARCHAR(20), @Kierowca2 NVARCHAR(20))
+AS
+  UPDATE Obsluga_trasy
+  SET ID_Kierowcy=@Kierowca2
+  WHERE ID_Kierowcy=@Kierowca1
+GO
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+SELECT * FROM Obsluga_trasy RIGHT JOIN Pracownicy
+ON Pracownicy.ID_Pracownika = Obsluga_trasy.ID_Kierowcy
+WHERE Pracownicy.ID_Pracownika = 'KA0050' OR Pracownicy.ID_Pracownika = 'KA0001'
+
+EXEC proc_wymienKierowce 'KA0001', 'KA0050'
+
+SELECT * FROM Obsluga_trasy RIGHT JOIN Pracownicy
+ON Pracownicy.ID_Pracownika = Obsluga_trasy.ID_Kierowcy
+WHERE Pracownicy.ID_Pracownika = 'KA0050' OR Pracownicy.ID_Pracownika = 'KA0001'
+
+
+==============================================
+IF OBJECT_ID('dbo.proc_zmienNazwePrzystanku') IS NOT NULL
+DROP PROC proc_zmienNazwePrzystanku
+GO
+CREATE PROC proc_zmienNazwePrzystanku (@NazwaAktualna NVARCHAR(100), @NazwaZmieniona NVARCHAR(100))
+AS
+  IF EXISTS(SELECT * FROM Przystanki WHERE Nazwa_przystanku=@NazwaAktualna AND Automat_biletowy=1)
+  BEGIN
+    ALTER TABLE Linie DROP CONSTRAINT Linie_Przystanki_FK
+    ALTER TABLE Linie DROP CONSTRAINT Linie_Przystanki_FKv1
+    ALTER TABLE Przystanki_na_linii DROP CONSTRAINT Przystanki_na_linii_Przystanki_FK
+
+    UPDATE Przystanki
+    SET Nazwa_przystanku = @NazwaZmieniona
+    WHERE Nazwa_przystanku = @NazwaAktualna
+    UPDATE Linie
+    SET Przystanek_A = @NazwaZmieniona
+    WHERE Przystanek_A = @NazwaAktualna
+    UPDATE Linie
+    SET Przystanek_B = @NazwaZmieniona
+    WHERE Przystanek_B = @NazwaAktualna
+    UPDATE Przystanki_na_linii
+    SET Nazwa_przystanku = @NazwaZmieniona
+    WHERE Nazwa_przystanku = @NazwaAktualna
+    UPDATE Punkty_sprzedazy
+    SET Lokalizacja = 'przystanek ' + @NazwaZmieniona
+    WHERE Lokalizacja LIKE '%'+@NazwaAktualna+'%'
+
+    ALTER TABLE Linie ADD CONSTRAINT Linie_Przystanki_FK FOREIGN KEY (Przystanek_A) REFERENCES Przystanki (Nazwa_przystanku)
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION
+
+    ALTER TABLE Linie ADD CONSTRAINT Linie_Przystanki_FKv1 FOREIGN KEY (Przystanek_B) REFERENCES Przystanki (Nazwa_przystanku)
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION
+
+    ALTER TABLE Przystanki_na_linii ADD CONSTRAINT Przystanki_na_linii_Przystanki_FK FOREIGN KEY (Nazwa_przystanku) REFERENCES Przystanki (Nazwa_przystanku)
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION
+    
+  END
+GO
+
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+SELECT * FROM Przystanki
+WHERE Nazwa_przystanku LIKE 'B%'
+SELECT * FROM Punkty_sprzedazy
+WHERE ID_punktu_sprzedaży = 'PS0009'
+
+EXEC proc_zmienNazwePrzystanku 'Bulwarowa New', 'Bulwarowa'
+
+SELECT * FROM Przystanki
+WHERE Nazwa_przystanku LIKE 'B%'
+SELECT * FROM Punkty_sprzedazy
+WHERE ID_punktu_sprzedaży = 'PS0009'
+
+==============================================
+
+IF OBJECT_ID('DBO.proc_dodajTrase','P') IS NOT NULL
+DROP PROC DBO.proc_dodajTrase
+GO
+
+CREATE PROCEDURE DBO.proc_dodajTrase
+(
+  @NrLinii int,
+  @GodzinaOdjazdu Time,
+  @KirunekTrasy BIT,
+  @idKierowcy NVARCHAR(20),
+  @idPojazdu NVARCHAR(20)
+)
+AS
+
+if EXISTS( select * from Obsluga_trasy where ID_Kierowcy = @idKierowcy) AND EXISTS ( select * from Obsluga_trasy where Id_Pojazdu = @idPojazdu) 
+begin
+  IF EXISTS ( select * from Obsluga_trasy where Nr_Linii = @NrLinii)
+  begin
+    IF NOT EXISTS ( select * from Obsluga_trasy where Kierunek_trasy = @KirunekTrasy) OR NOT EXISTS ( select * from Obsluga_trasy where Godzina_odjazdu = @GodzinaOdjazdu)
+    begin
+      
+       Insert into Obsluga_trasy Values (@NrLinii, @GodzinaOdjazdu, @KirunekTrasy, @idKierowcy, @idPojazdu)
+    end 
+    ELSE
+      Print 'Niestety w bazie znajduje się juz taki rekord'
+  end 
+  ELSE
+    Print 'Niestety w bazie nie ma zadaniej linii'
+end 
+ELSE
+  Print 'Niestety w bazie nie ma Kierowcy o zadanym Id, lub pojazdu'
+GO
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+EXEC proc_dodajTrase 72, '12:00:00', 1, 'KA0001', 'RG0060'
+EXEC proc_dodajTrase 4, '06:00:00', 0, 'KA0001', 'RG0060'
+EXEC proc_dodajTrase 4, '04:00:00', 1, 'KA0303', 'RG0060'
+
+==============================================
+
+
+IF OBJECT_ID('DBO.proc_dodajUsterke','P') IS NOT NULL
+DROP PROC DBO.proc_dodajUsterke
+GO
+
+CREATE PROCEDURE DBO.proc_dodajUsterke
+( 
+  @ID_Usterki NVARCHAR(20),
+  @ID_Pojazdu NVARCHAR(20),
+  @Rodzaj_szkody NVARCHAR(200),
+  @DataZdarzenia Date   
+)
+AS 
+if EXISTS( select * from Pojazdy where ID_Pojazdu = @ID_Pojazdu) 
+begin
+  if NOT EXISTS( select * from Historia_usterek where ID_Usterki = @ID_Usterki) 
+  begin
+    Insert into Historia_usterek Values (@ID_Usterki, @ID_Pojazdu, @Rodzaj_szkody, @DataZdarzenia)
+  end
+  else
+    Print 'Niestety w bazie jest juz usterka o zadanym id';   
+end 
+else
+  Print 'Niestety w bazie nie ma pojazdu o zadanym id'; 
+GO
+
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+EXEC  proc_dodajUsterke 'UST0010','BA0011', 'no jaaks szkoda', '2016-09-04' 
+EXEC  proc_dodajUsterke 'UST0011','BA0011', 'no jaaks szkoda', '2016-09-04' 
+EXEC  proc_dodajUsterke 'UST0012','BA1011', 'no jaaks szkoda', '2016-09-04' 
+
+==============================================
+
+IF OBJECT_ID('dbo.proc_premiaUrlop') IS NOT NULL
+DROP PROC proc_premiaUrlop
+GO
+CREATE PROC proc_premiaUrlop (
+  @maxIlosc INTEGER
+)
+AS
+
+  DECLARE @pozostalo INT
+  SET @pozostalo = @maxIlosc
+
+  DECLARE @PracownicyLimit TABLE
+  (
+    ID_Pracownika NVARCHAR (20),
+    Dni_urlopu INT
+  )
+
+  INSERT INTO @PracownicyLimit (ID_Pracownika, Dni_urlopu)
+    SELECT P.ID_Pracownika, 0
+    FROM Pracownicy P LEFT JOIN Urlopy U
+    ON P.ID_Pracownika = U.ID_Pracownika
+    WHERE U.Poczatek_urlopu IS NULL
+
+  SET @pozostalo = @pozostalo - (SELECT COUNT(DISTINCT Pl.ID_Pracownika) FROM @PracownicyLimit AS Pl)
+  
+  IF @pozostalo > 0
+  BEGIN
+    DECLARE @maxDays INT
+    SET @maxDays = 
+    (
+    SELECT TOP 1 Dni_urlopu 
+    FROM 
+    ( 
+      SELECT TOP (@pozostalo) U.ID_Pracownika, SUM(CAST(DATEDIFF(DAY, U.Poczatek_urlopu, DATEADD(DAY,1,U.Koniec_urlopu)) AS INT)) AS Dni_urlopu 
+      FROM Urlopy U 
+      GROUP BY U.ID_Pracownika
+      ORDER BY Dni_urlopu 
+    ) sub 
+    ORDER BY Dni_urlopu DESC 
+    )
+  
+    INSERT INTO @PracownicyLimit (ID_Pracownika, Dni_urlopu)
+      SELECT U.ID_Pracownika, SUM(CAST(DATEDIFF(DAY, U.Poczatek_urlopu, DATEADD(DAY,1,U.Koniec_urlopu)) AS INT)) AS Dni_urlopu
+      FROM Urlopy U
+      GROUP BY U.ID_Pracownika
+      HAVING  SUM(CAST(DATEDIFF(DAY, U.Poczatek_urlopu, DATEADD(DAY,1,U.Koniec_urlopu)) AS INT)) <= @maxDays
+      ORDER BY Dni_urlopu ASC
+
+  END
+
+  UPDATE Da
+  SET Pensja = CAST((1.10 * Pensja) AS MONEY)
+  FROM Dane_osobowe AS Da
+    INNER JOIN @PracownicyLimit AS P
+  ON Da.ID_Pracownika = P.ID_Pracownika
+  WHERE P.Dni_urlopu IS NOT NULL
+
+GO
+
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+SELECT D.ID_Pracownika, D.Pensja
+FROM Dane_osobowe D JOIN Urlopy U
+ON D.ID_Pracownika = U.ID_Pracownika
+WHERE U.Poczatek_urlopu IS NOT NULL
+
+EXEC proc_premiaUrlop 71
+
+SELECT D.ID_Pracownika, D.Pensja
+FROM Dane_osobowe D JOIN Urlopy U
+ON D.ID_Pracownika = U.ID_Pracownika
+WHERE U.Poczatek_urlopu IS NOT NULL

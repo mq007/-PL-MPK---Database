@@ -1,0 +1,584 @@
+IF OBJECT_ID('dbo.fun_rozkladNaLinii') IS NOT NULL
+  DROP FUNCTION dbo.fun_rozkladNaLinii;
+GO
+CREATE FUNCTION dbo.fun_rozkladNaLinii
+(@numer AS INT, @kierunek AS BIT) RETURNS @rozkladJazdy TABLE
+  (
+    NrLinii int,
+    NazwaPrzystanku NVARCHAR(100),
+    Kierunek_trasy BIT,
+    Czasy NVARCHAR(4000)
+  )
+AS
+  BEGIN
+    DECLARE @name NVARCHAR(100)
+    DECLARE @czas DATETIME
+    DECLARE @start DATETIME
+    DECLARE @dodajCzas DATETIME
+    DECLARE @czasDojazdu DATETIME
+    DECLARE @czasyRozkladu NVARCHAR(4000)
+
+    SET @dodajCzas = '00:00:00'
+    SET @czasyRozkladu = ''
+    if(@kierunek = 0 )
+    BEGIN
+      DECLARE getPrzystankiNaLinii CURSOR LOCAL
+        FOR SELECT Nazwa_przystanku, Czas_dojazdu_trasa_B FROM Przystanki_na_Linii 
+        WHERE Nr_linii=@numer FOR READ ONLY
+        OPEN getPrzystankiNaLinii
+        FETCH getPrzystankiNaLinii INTO @name, @czas
+        WHILE @@FETCH_STATUS=0
+        BEGIN
+          SET @dodajCzas = @dodajCzas + @czas
+          DECLARE curStartTime CURSOR LOCAL
+            FOR SELECT Godzina_odjazdu FROM Obsluga_trasy 
+            WHERE Kierunek_trasy=0 AND Nr_Linii = @numer FOR READ ONLY
+          OPEN curStartTime
+          FETCH curStartTime INTO @start
+          WHILE @@FETCH_STATUS=0
+          BEGIN
+            SET @czasDojazdu = @dodajCzas + @start
+            SET @czasyRozkladu = @czasyRozkladu + CONVERT(NVARCHAR(5), CONVERT(TIME(0), @czasDojazdu)) + ', '
+            FETCH curStartTime INTO @start
+          END
+          CLOSE curStartTime
+          DEALLOCATE curStartTime 
+          INSERT INTO @rozkladJazdy VALUES
+            (@numer, @name, @kierunek, @czasyRozkladu)
+          SET @czasyRozkladu = ''
+          FETCH getPrzystankiNaLinii INTO @name, @czas
+        END
+        CLOSE getPrzystankiNaLinii
+        DEALLOCATE getPrzystankiNaLinii
+      END
+      ELSE
+      BEGIN
+        DECLARE getPrzystankiNaLinii CURSOR LOCAL
+        FOR SELECT Nazwa_przystanku, Czas_dojazdu_trasa_A FROM Przystanki_na_Linii 
+        WHERE Nr_linii=@numer
+        ORDER BY Nr_Przystanku DESC FOR READ ONLY
+        OPEN getPrzystankiNaLinii
+        FETCH getPrzystankiNaLinii INTO @name, @czas
+        WHILE @@FETCH_STATUS=0
+        BEGIN
+          SET @dodajCzas = @dodajCzas + @czas
+          DECLARE curStartTime CURSOR LOCAL
+            FOR SELECT Godzina_odjazdu FROM Obsluga_trasy 
+            WHERE Kierunek_trasy=1 AND Nr_Linii = @numer FOR READ ONLY
+          OPEN curStartTime
+          FETCH curStartTime INTO @start
+          WHILE @@FETCH_STATUS=0
+          BEGIN
+            SET @czasDojazdu = @dodajCzas + @start
+            SET @czasyRozkladu = @czasyRozkladu + CONVERT(NVARCHAR(5), CONVERT(TIME(0), @czasDojazdu)) + ', '
+            FETCH curStartTime INTO @start
+          END
+          CLOSE curStartTime
+          DEALLOCATE curStartTime 
+          INSERT INTO @rozkladJazdy VALUES
+            (@numer, @name, @kierunek, @czasyRozkladu)
+          SET @czasyRozkladu = ''
+          FETCH getPrzystankiNaLinii INTO @name, @czas
+        END
+        CLOSE getPrzystankiNaLinii
+        DEALLOCATE getPrzystankiNaLinii 
+      END
+    RETURN
+  END
+GO
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+SELECT * FROM fun_rozkladNaLinii(4, 0)
+SELECT * FROM fun_rozkladNaLinii(4, 1)
+
+
+==============================================
+IF OBJECT_ID('dbo.fun_sprzedaneWOkresie') IS NOT NULL
+  DROP FUNCTION dbo.fun_sprzedaneWOkresie;
+GO
+CREATE FUNCTION dbo.fun_sprzedaneWOkresie
+(@date1 AS DATE, @date2 AS DATE) RETURNS @tab TABLE
+(
+  Bilety_jednoprzejazdowe INT,
+  Bilety_okresowe INT
+)
+AS
+BEGIN
+  DECLARE @suma_bj INT
+  DECLARE @suma_bo INT
+  SET @suma_bj =
+  (SELECT COUNT(*) FROM Bilety_jednoprzejazdowe
+  WHERE Data_zakupu BETWEEN @date1 AND @date2)
+  SET @suma_bo =
+  (SELECT COUNT(*) FROM Bilety_okresowe
+  WHERE Data_zakupu BETWEEN @date1 AND @date2)
+  INSERT INTO @tab VALUES
+  (@suma_bj, @suma_bo)
+  RETURN
+END
+GO
+
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+SELECT * FROM dbo.fun_sprzedaneWOkresie('2015-03-05', '2016-01-05')
+
+
+==============================================
+IF OBJECT_ID('dbo.fun_linieLiczbaPrzystankow') IS NOT NULL
+  DROP FUNCTION dbo.fun_linieLiczbaPrzystankow;
+GO
+CREATE FUNCTION dbo.fun_linieLiczbaPrzystankow
+(@ile INT) RETURNS @tab TABLE
+(
+  Nr_Linii INT,
+  Ilosc_przystankow INT
+)
+AS
+BEGIN
+  DECLARE @numer INT
+  DECLARE @przystanki INT
+  SET @numer = 0
+  SET @przystanki = 0
+
+  DECLARE getPrzystankiNaLinii CURSOR LOCAL
+    FOR SELECT Nr_linii , COUNT(*) as 'Liczba przystanków' FROM Przystanki_na_linii
+      GROUP BY Nr_linii FOR READ ONLY
+    OPEN getPrzystankiNaLinii
+    FETCH getPrzystankiNaLinii INTO @numer, @przystanki
+    WHILE @@FETCH_STATUS=0
+    BEGIN
+      INSERT INTO @tab VALUES
+      (@numer, @przystanki)
+      FETCH getPrzystankiNaLinii INTO @numer, @przystanki
+    END
+  RETURN
+END
+GO
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+SELECT * FROM fun_linieLiczbaPrzystankow(10)
+
+==============================================
+IF OBJECT_ID('dbo.fun_wolniKierowcy') IS NOT NULL
+  DROP FUNCTION dbo.fun_wolniKierowcy;
+GO
+CREATE FUNCTION dbo.fun_wolniKierowcy () RETURNS @tab TABLE(ID Nvarchar(100), Imie Nvarchar(100), Nazwisko Nvarchar(100), Data_zat Date)
+AS
+  BEGIN       
+    Insert into @tab
+      Select D.ID_Pracownika, D.Imie, D.Nazwisko, D.Data_zatrudnienia from Dane_osobowe as D where ID_Pracownika in 
+      (select P.ID_Pracownika from Pracownicy as P left join Obsluga_trasy as OT 
+      on P.ID_Pracownika = Ot.ID_Kierowcy where P.ID_Pracownika Like 'KA%' and Ot.ID_Kierowcy is Null)
+    return
+  END
+GO 
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+SELECT * FROM fun_wolniKierowcy()
+
+==============================================
+ IF OBJECT_ID('dbo.fun_sprzedaneWPunkcie') IS NOT NULL
+  DROP FUNCTION dbo.fun_sprzedaneWPunkcie;
+GO
+CREATE FUNCTION dbo.fun_sprzedaneWPunkcie (@id_punktu Nvarchar(20)) RETURNS @tab TABLE(typ Nvarchar(100), Ilosc int)
+AS
+  BEGIN       
+     Insert into @tab 
+      select Typ_biletu, Count(Typ_biletu) from Bilety_jednoprzejazdowe 
+      where ID_punktu_sprzedazy = @id_punktu group by Typ_biletu 
+     Insert into @tab
+     select Typ_biletu, Count(Typ_biletu) from Bilety_okresowe
+      where ID_punktu_sprzedazy = @id_punktu group by Typ_biletu 
+    return
+  END
+GO 
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+Select * from fun_sprzedaneWPunkcie('PS0012')
+
+
+==============================================
+IF OBJECT_ID('dbo.fun_czasPrzejazdu') IS NOT NULL
+  DROP FUNCTION dbo.fun_czasPrzejazdu;
+GO
+CREATE FUNCTION dbo.fun_czasPrzejazdu
+(@przyst1 AS NVARCHAR (100), @przyst2 AS NVARCHAR (100), @nrLinii AS INT) RETURNS @tab TABLE
+(
+  Przystanek_A NVARCHAR (100),
+  ystanek_B NVARCHAR (100),
+  Czas TIME
+)
+AS
+BEGIN
+  DECLARE @przystNr1 INT
+  DECLARE @przystNr2 INT
+  DECLARE @czasPrzejazdu TIME
+  SET @przystNr1 = 0
+  SET @przystNr2 = 0
+  SET @czasPrzejazdu = '0:00:00'
+
+  SET @przystNr1 = 
+  (SELECT P.Nr_przystanku
+  FROM Przystanki_na_linii AS P
+  WHERE P.Nazwa_przystanku = @przyst1 AND P.Nr_linii = @nrLinii)
+
+  SET @przystNr2 = 
+  (SELECT P.Nr_przystanku
+  FROM Przystanki_na_linii AS P
+  WHERE P.Nazwa_przystanku = @przyst2 AND P.Nr_linii = @nrLinii)
+
+  IF @przystNr1 < @przystNr2
+  BEGIN
+    SET @czasPrzejazdu = 
+    (
+    SELECT DATEADD(second, SUM(DATEDIFF(second, '0:00:00', Pl.Czas_dojazdu_trasa_B)), '0:00:00') AS TIME
+    FROM Przystanki_na_linii AS Pl
+    WHERE Pl.Nr_przystanku > @przystNr1 AND pl.Nr_przystanku <= @przystNr2 AND Pl.Nr_linii = @nrLinii
+    )
+  END
+  ELSE
+  BEGIN
+    SET @czasPrzejazdu = 
+    (
+    SELECT DATEADD(second, SUM(DATEDIFF(second, '0:00:00', Pl.Czas_dojazdu_trasa_A)), '0:00:00') AS TIME
+    FROM Przystanki_na_linii AS Pl
+    WHERE Pl.Nr_przystanku >= @przystNr2 AND pl.Nr_przystanku < @przystNr1 AND Pl.Nr_linii = @nrLinii
+    )
+  END
+
+  INSERT INTO @tab VALUES
+  (@przyst1, @przyst2, @czasPrzejazdu)
+  RETURN
+END
+GO
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+SELECT * FROM dbo.fun_czasPrzejazdu('Rondo Czyżyńskie','Kombinat',  4)
+SELECT * FROM dbo.fun_czasPrzejazdu('Lubicz','AWF',  52)
+
+==============================================
+IF OBJECT_ID('dbo.fun_naprawyMechanika') IS NOT NULL
+  DROP FUNCTION dbo.fun_naprawyMechanika;
+GO
+CREATE FUNCTION dbo.fun_naprawyMechanika
+(@progNapraw AS INT) RETURNS @tab TABLE
+(
+  ID_Pracownika NVARCHAR (20),
+    Imie NVARCHAR (100),
+    Nazwisko NVARCHAR (100),
+  Telefon NVARCHAR (15),
+  IloscNapraw INT
+)
+AS
+BEGIN
+  DECLARE @NaprawyMechnikow TABLE
+  (
+    ID_Pracownika NVARCHAR (20),
+    IloscNapraw INT
+  )
+
+  INSERT INTO @NaprawyMechnikow (ID_Pracownika, IloscNapraw)
+    SELECT P.ID_Pracownika, COUNT(N.ID_Mechanika) AS Ilosc_Napraw
+    FROM Pracownicy P
+       LEFT JOIN Naprawy N
+        ON P.ID_Pracownika = N.ID_Mechanika
+    WHERE P.Funkcja = 'Mechanik'
+    GROUP BY P.ID_Pracownika
+    HAVING COUNT(N.ID_Mechanika) <= @progNapraw
+    ORDER BY Ilosc_Napraw
+
+  INSERT INTO @tab (ID_Pracownika, Imie, Nazwisko, Telefon, IloscNapraw )
+    SELECT N.ID_Pracownika, Os.Imie, Os.Nazwisko, K.Telefon, N.IloscNapraw
+    FROM @NaprawyMechnikow N
+      JOIN Dane_osobowe Os
+        ON N.ID_Pracownika = Os.ID_Pracownika
+      JOIN Dane_kontaktowe K
+        ON N.ID_Pracownika = K.ID_Pracownika
+    ORDER BY IloscNapraw
+    
+
+  RETURN
+END
+GO
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+SELECT * FROM dbo.fun_naprawyMechanika(3) 
+ORDER BY IloscNapraw
+
+==============================================
+
+IF OBJECT_ID('dbo.fun_rankingDniUrlopowych') IS NOT NULL
+  DROP FUNCTION dbo.fun_rankingDniUrlopowych;
+GO
+CREATE FUNCTION dbo.fun_rankingDniUrlopowych
+( @rokArg NVARCHAR(4) ) RETURNS @tab TABLE
+(
+  ID_Pracownika NVARCHAR (20),
+  Dni_urlopu INT,
+    Imie NVARCHAR (100),
+    Nazwisko NVARCHAR (100)
+)
+AS
+BEGIN
+
+  DECLARE @UrlopyPracownikow TABLE
+  (
+    ID_Pracownika NVARCHAR (20),
+    Dni_urlopu INT
+  )
+
+  DECLARE @rok DATE
+  SET @rok = @rokArg + '-01-01'
+  DECLARE @rokKoniec DATE
+  SET @rokKoniec = @rokArg + '-12-31'
+
+  INSERT INTO @UrlopyPracownikow (ID_Pracownika, Dni_urlopu)
+    SELECT U.ID_Pracownika, 
+    SUM(
+    CASE
+      WHEN
+        DATEPART(YEAR, @rok) = DATEPART(YEAR, U.Poczatek_urlopu)
+        AND DATEPART(YEAR, @rok) = DATEPART(YEAR, U.Koniec_urlopu)
+      THEN 
+        CAST(DATEDIFF(DAY, U.Poczatek_urlopu, DATEADD(DAY,1,U.Koniec_urlopu)) AS INT)
+
+      WHEN
+        DATEPART(YEAR, @rok) > DATEPART(YEAR, U.Poczatek_urlopu)
+        AND DATEPART(YEAR, @rok) = DATEPART(YEAR, U.Koniec_urlopu)
+      THEN 
+        CAST(DATEDIFF(DAY, @rok, DATEADD(DAY,1,U.Koniec_urlopu)) AS INT)
+
+      WHEN
+        DATEPART(YEAR, @rok) = DATEPART(YEAR, U.Poczatek_urlopu)
+        AND DATEPART(YEAR, @rok) < DATEPART(YEAR, U.Koniec_urlopu)
+      THEN 
+        CAST(DATEDIFF(DAY, U.Poczatek_urlopu, DATEADD(DAY,1,@rokKoniec)) AS INT)
+
+    END
+    ) AS Ilosc_dni_urlopu_w_roku
+    FROM Urlopy U
+    GROUP BY ID_Pracownika
+    ORDER BY Ilosc_dni_urlopu_w_roku
+
+  INSERT INTO @tab (ID_Pracownika, Dni_urlopu, Imie, Nazwisko)
+    SELECT U.ID_Pracownika, U.Dni_urlopu, Os.Imie, Os.Nazwisko
+    FROM @UrlopyPracownikow U
+      JOIN Dane_osobowe Os
+        ON U.ID_Pracownika = Os.ID_Pracownika
+    WHERE U.Dni_urlopu IS NOT NULL
+    ORDER BY U.Dni_urlopu
+
+
+  RETURN
+END
+GO
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+SELECT * FROM dbo.fun_rankingDniUrlopowych('2017') 
+ORDER BY Dni_urlopu DESC
+
+==============================================
+IF OBJECT_ID('dbo.fun_rankingMandatow') IS NOT NULL
+  DROP FUNCTION dbo.fun_rankingMandatow;
+GO
+CREATE FUNCTION dbo.fun_rankingMandatow() RETURNS @tab TABLE
+(
+  ID_Klienta NVARCHAR (20),
+    Imie NVARCHAR (100),
+    Nazwisko NVARCHAR (100),
+  Adres NVARCHAR (100),
+  Ilosc_mandatow INT,
+  Kwota_do_zaplaty MONEY
+)
+AS
+BEGIN
+  DECLARE @RankingMandatow TABLE
+  (
+    ID_Klienta NVARCHAR (20),
+    Ilosc_mandatow INT,
+    Kwota_do_zaplaty MONEY
+  )
+
+  INSERT INTO @RankingMandatow(ID_Klienta, Ilosc_mandatow, Kwota_do_zaplaty)
+    SELECT H.ID_Klienta, COUNT(H.ID_Klienta) AS Ilosc_mandatow,
+    CAST(SUM(H.Kwota) AS MONEY) AS Do_zaplaty
+    FROM Historia_mandatow H
+    GROUP BY H.ID_Klienta
+    ORDER BY Ilosc_mandatow DESC
+
+  INSERT INTO @tab (ID_Klienta, Imie, Nazwisko, Adres, Ilosc_mandatow, Kwota_do_zaplaty)
+    SELECT R.ID_Klienta, K.Imie, K.Nazwisko, K.Adres, R.Ilosc_mandatow, R.Kwota_do_zaplaty
+    FROM @RankingMandatow R
+      JOIN Klienci K
+        ON R.ID_Klienta = K.ID_Klienta
+    ORDER BY R.Ilosc_mandatow
+    
+  RETURN
+END
+GO
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+SELECT * FROM dbo.fun_rankingMandatow()
+ORDER BY Ilosc_mandatow DESC, Kwota_do_zaplaty DESC
+
+==============================================
+
+IF OBJECT_ID('dbo.fun_rozkladPrzystanku') IS NOT NULL
+  DROP FUNCTION dbo.fun_rozkladPrzystanku;
+GO
+CREATE FUNCTION dbo.fun_rozkladPrzystanku
+(@przystanek AS NVARCHAR(100), @kierunek AS BIT) RETURNS @rozkladJazdy TABLE
+  (
+    NrLinii int, 
+    Kierunek_trasy BIT,
+    Czasy NVARCHAR(4000)
+  )
+AS
+  BEGIN
+
+    DECLARE @name NVARCHAR(100)
+    DECLARE @czas DATETIME
+    DECLARE @start DATETIME   
+    DECLARE @addT DATETIME
+    DECLARE @dodajCzas DATETIME
+    DECLARE @czasDojazdu DATETIME
+    DECLARE @czasyRozkladu NVARCHAR(4000)   
+    DECLARE @tempPrzys NVARCHAR(100)
+    DECLARE @nrPrzystanku INT
+
+    DECLARE @iter INT
+
+    SET @dodajCzas = '00:00:00'
+    SET @czasyRozkladu = '| '   
+    SET @nrPrzystanku =0
+    SET @iter =0
+    SET @tempPrzys =''
+
+    if(@kierunek = 0 ) 
+    BEGIN
+        DECLARE getPrzystanek CURSOR LOCAL
+        FOR SELECT Nr_linii FROM Przystanki_na_Linii 
+        WHERE Nazwa_przystanku=@przystanek FOR READ ONLY
+        OPEN getPrzystanek
+        FETCH getPrzystanek INTO @name 
+        WHILE @@FETCH_STATUS=0
+        BEGIN
+           
+          SELECT @nrPrzystanku = Nr_przystanku from Przystanki_na_linii where Nazwa_przystanku = @przystanek and Nr_linii =@name
+          
+          DECLARE curAddTime CURSOR LOCAL
+            FOR SELECT Czas_dojazdu_trasa_B FROM Przystanki_na_linii
+            where Nr_linii =@name FOR READ ONLY
+          OPEN curAddTime
+          FETCH curAddTime INTO @addT
+          WHILE @@FETCH_STATUS = 0 AND @iter !=@nrPrzystanku
+          BEGIN
+            SET @dodajCzas = @dodajCzas + @addT
+            SET @iter = @iter+1
+            FETCH curAddTime INTO @addT
+          END
+          CLOSE curAddTime
+          DEALLOCATE curAddTime
+
+          DECLARE curStartTime CURSOR LOCAL
+            FOR SELECT Godzina_odjazdu FROM Obsluga_trasy 
+            WHERE Nr_Linii = @name AND Kierunek_trasy =0 FOR READ ONLY
+          OPEN curStartTime
+          FETCH curStartTime INTO @start 
+          
+          WHILE @@FETCH_STATUS=0
+          BEGIN
+            SET @czasDojazdu =  @start +@dodajCzas
+            SET @czasyRozkladu = @czasyRozkladu + CONVERT(NVARCHAR(5), CONVERT(TIME(0), @czasDojazdu)) + ' | '
+            FETCH curStartTime INTO @start
+          END
+          CLOSE curStartTime
+          DEALLOCATE curStartTime 
+          INSERT INTO @rozkladJazdy VALUES
+            ( @name, @kierunek, @czasyRozkladu)
+          SET @czasyRozkladu = '| '
+          FETCH getPrzystanek INTO @name 
+        END
+        CLOSE getPrzystanek
+        DEALLOCATE getPrzystanek
+      END
+      ELSE 
+      BEGIN
+
+      DECLARE getPrzystanek CURSOR LOCAL
+        FOR SELECT Nr_linii FROM Przystanki_na_Linii 
+        WHERE Nazwa_przystanku=@przystanek FOR READ ONLY
+        OPEN getPrzystanek
+        FETCH getPrzystanek INTO @name
+        WHILE @@FETCH_STATUS=0
+        BEGIN
+           
+           SELECT @nrPrzystanku = Nr_przystanku from Przystanki_na_linii where Nazwa_przystanku = @przystanek and Nr_linii =@name 
+          
+          DECLARE curAddTime CURSOR LOCAL
+            FOR SELECT Czas_dojazdu_trasa_A, Nazwa_przystanku FROM Przystanki_na_linii
+            where Nr_linii =@name ORDER by Nr_przystanku DESC FOR READ ONLY
+          OPEN curAddTime
+          FETCH curAddTime INTO @addT, @tempPrzys
+
+          WHILE @@FETCH_STATUS = 0 AND @tempPrzys != @przystanek
+          BEGIN
+            SET @dodajCzas = @dodajCzas + @addT
+            SET @iter = @iter+1
+            FETCH curAddTime INTO @addT, @tempPrzys
+          END
+          SET @dodajCzas = @dodajCzas + @addT
+          CLOSE curAddTime
+          DEALLOCATE curAddTime
+
+          DECLARE curStartTime CURSOR LOCAL
+            FOR SELECT Godzina_odjazdu FROM Obsluga_trasy 
+            WHERE Nr_Linii = @name AND Kierunek_trasy =0 FOR READ ONLY
+          OPEN curStartTime
+          FETCH curStartTime INTO @start 
+          
+          WHILE @@FETCH_STATUS=0
+          BEGIN
+            SET @czasDojazdu =  @start +@dodajCzas
+            SET @czasyRozkladu = @czasyRozkladu + CONVERT(NVARCHAR(5), CONVERT(TIME(0), @czasDojazdu)) + ' | '
+            FETCH curStartTime INTO @start
+          END
+          CLOSE curStartTime
+          DEALLOCATE curStartTime 
+          INSERT INTO @rozkladJazdy VALUES
+            ( @name, @kierunek, @czasyRozkladu)
+          SET @czasyRozkladu = '| '
+          FETCH getPrzystanek INTO @name
+        END
+        CLOSE getPrzystanek
+        DEALLOCATE getPrzystanek
+      END
+    
+    RETURN
+  END
+GO
+==============================================
+      PRZYKŁADY DZIAŁANIA
+==============================================
+
+SELECT * FROM fun_rozkladPrzystanku('Chmieleniec', 1)
+SELECT * FROM fun_rozkladPrzystanku('Struga', 0)
+SELECT * FROM fun_rozkladPrzystanku('Czyżyny', 1)
+SELECT * FROM fun_rozkladPrzystanku('AWF', 0)

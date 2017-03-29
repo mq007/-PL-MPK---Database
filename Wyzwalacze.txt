@@ -1,0 +1,44 @@
+CREATE TRIGGER Tr1 ON Typy_biletow
+  AFTER UPDATE
+  AS
+  IF UPDATE(Cena)
+  SELECT SUSER_SNAME(), GETDATE(),I.Typ_biletu,D.Cena, I.Cena
+  FROM inserted I JOIN deleted d ON I.Typ_biletu=D.Typ_biletu
+GO
+
+CREATE TRIGGER Tr2 ON Bilety_okresowe
+  AFTER DELETE
+  AS
+    ROLLBACK
+    RAISERROR('Nie mozna kasowac wierszy z tabeli Bilety_okresowe',16,1)
+GO
+
+CREATE TRIGGER Tr3 ON Bilety_jednoprzejazdowe
+  AFTER DELETE
+  AS
+    ROLLBACK
+    RAISERROR('Nie mozna kasowac wierszy z tabeli Bilety_jednoprzejazdowe',16,1)
+GO
+
+CREATE TRIGGER Tr4 ON Bilety_okresowe
+  AFTER INSERT
+  AS
+    UPDATE Bilety_okresowe
+    SET Cena_zakupu = T.Cena
+    FROM [Bilety_okresowe] B
+    JOIN typy_biletow T 
+    ON B.Typ_biletu = T.Typ_biletu
+GO
+
+CREATE TRIGGER Tr5 ON Harmonogram_sprzatania
+AFTER DELETE
+AS 
+  IF EXISTS ( SELECT * FROM deleted d
+        WHERE d.Dzien_tygodnia = DATEPART(dw, GETDATE()))
+  BEGIN
+    ROLLBACK
+    PRINT 'Nie mozna usunac firmy poniewaz dzisiaj sprzata pojazd'
+  END
+  ELSE
+    PRINT 'Usuniecie firmy przebieglo pomyślnie'
+GO
